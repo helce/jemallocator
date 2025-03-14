@@ -364,6 +364,7 @@ fn gnu_target(target: &str) -> String {
         "x86_64-pc-windows-gnu" => "x86_64-w64-mingw32".to_string(),
         "armv7-linux-androideabi" => "arm-linux-androideabi".to_string(),
         "riscv64gc-unknown-linux-gnu" => "riscv64-linux-gnu".to_string(),
+        _ if target.starts_with("e2k") => "e2k-mcst-linux-gnu".to_string(),
         s => s.to_string(),
     }
 }
