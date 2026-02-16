@@ -111,10 +111,16 @@ fn main() {
             .iter()
             .any(|i| target.contains(i))
     {
-        warning!(
-            "Unprefixed `malloc` requested on unsupported platform `{}` => using prefixed `malloc`",
-            target
-        );
+        // Apple targets don't support unprefixed, but they do support
+        // overriding (if you do the `zone_register` trick), so no need to
+        // warn there.
+        let override_ = env::var("CARGO_FEATURE_OVERRIDE_ALLOCATOR_ON_SUPPORTED_PLATFORMS").is_ok();
+        if !target.contains("apple") || !override_ {
+            warning!(
+                "Unprefixed `malloc` requested on unsupported platform `{}` => using prefixed `malloc`",
+                target
+            );
+        }
         use_prefix = true;
     }
 
@@ -302,32 +308,25 @@ fn main() {
 
     // Make:
     let make = make_cmd(&host);
-    run(Command::new(make)
-        .current_dir(&build_dir)
-        .arg("-j")
-        .arg(num_jobs.clone()));
+    run(&mut make_command(make, &build_dir, &num_jobs));
 
     // Skip watching this environment variables to avoid rebuild in CI.
     if env::var("JEMALLOC_SYS_RUN_JEMALLOC_TESTS").is_ok() {
         info!("Building and running jemalloc tests...");
+
+        let mut cmd = make_command(make, &build_dir, &num_jobs);
+
         // Make tests:
-        run(Command::new(make)
-            .current_dir(&build_dir)
-            .arg("-j")
-            .arg(num_jobs.clone())
-            .arg("tests"));
+        run(cmd.arg("tests"));
 
         // Run tests:
         run(Command::new(make).current_dir(&build_dir).arg("check"));
     }
 
     // Make install:
-    run(Command::new(make)
-        .current_dir(&build_dir)
+    run(make_command(make, &build_dir, &num_jobs)
         .arg("install_lib_static")
-        .arg("install_include")
-        .arg("-j")
-        .arg(num_jobs));
+        .arg("install_include"));
 
     println!("cargo:root={}", out_dir.display());
 
@@ -367,9 +366,33 @@ fn main() {
     }
 }
 
+fn make_command(make_cmd: &str, build_dir: &Path, num_jobs: &str) -> Command {
+    let mut cmd = Command::new(make_cmd);
+    cmd.current_dir(build_dir);
+
+    if let Ok(makeflags) = std::env::var("CARGO_MAKEFLAGS") {
+        let makeflags = if let Ok(orig_makeflags) = std::env::var("MAKEFLAGS") {
+            format!("{orig_makeflags} {makeflags}")
+        } else {
+            makeflags
+        };
+        cmd.env("MAKEFLAGS", makeflags);
+    } else {
+        cmd.arg("-j").arg(num_jobs);
+    }
+    cmd
+}
+
 fn run_and_log(cmd: &mut Command, log_file: &Path) {
     execute(cmd, || {
-        run(Command::new("tail").arg("-n").arg("100").arg(log_file));
+        // In CI systems print the whole log since it can be difficult to get to
+        // a log file after the build fails. Otherwise print the last 100 lines
+        // to keep the output concise.
+        if env::var_os("CI").is_some() {
+            run(Command::new("cat").arg(log_file));
+        } else {
+            run(Command::new("tail").arg("-n").arg("100").arg(log_file));
+        }
     })
 }
 
