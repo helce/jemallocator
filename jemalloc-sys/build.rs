@@ -154,16 +154,27 @@ fn main() {
     // Disable -Wextra warnings - jemalloc doesn't compile free of warnings with
     // it enabled: https://github.com/jemalloc/jemalloc/issues/1196
     let compiler = cc::Build::new().extra_warnings(false).get_compiler();
-    let cflags = compiler
-        .args()
-        .iter()
-        .map(|s| s.to_str().unwrap())
-        .collect::<Vec<_>>()
-        .join(" ");
-    let ldflags = read_and_watch_env("LDFLAGS").unwrap_or_else(|_| cflags.clone());
-    info!("CC={:?}", compiler.path());
+    let cflags = compiler.cflags_env();
+    let ldflags = read_and_watch_env("LDFLAGS")
+        .map(OsString::from)
+        .unwrap_or_default();
+    let cppflags = read_and_watch_env("CPPFLAGS")
+        .map(OsString::from)
+        .unwrap_or_default();
+
+    // Use cc_env() to get the full CC value including any wrapper (e.g. sccache).
+    // cc_env() returns empty when no wrapper is configured, so fall back to path().
+    let cc = compiler.cc_env();
+    let cc = if cc.is_empty() {
+        compiler.path().as_os_str().to_owned()
+    } else {
+        cc
+    };
+
+    info!("CC={:?}", cc);
     info!("CFLAGS={:?}", cflags);
     info!("LDFLAGS={:?}", ldflags);
+    info!("CPPFLAGS={:?}", cppflags);
 
     assert!(out_dir.exists(), "OUT_DIR does not exist");
     let jemalloc_repo_dir = PathBuf::from("jemalloc");
@@ -197,10 +208,10 @@ fn main() {
             .replace('\\', "/"),
     )
     .current_dir(&build_dir)
-    .env("CC", compiler.path())
-    .env("CFLAGS", cflags.clone())
-    .env("LDFLAGS", ldflags.clone())
-    .env("CPPFLAGS", cflags)
+    .env("CC", &cc)
+    .env("CFLAGS", &cflags)
+    .env("LDFLAGS", &ldflags)
+    .env("CPPFLAGS", &cppflags)
     .arg(format!("--with-version={je_version}"))
     .arg("--disable-cxx")
     .arg("--enable-doc=no")
