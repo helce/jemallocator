@@ -223,6 +223,11 @@ fn main() {
         cmd.arg("--with-lg-page=14");
     }
 
+    // not in upstream, specify manually
+    if target.starts_with("e2k") {
+        cmd.arg(format!("--with-lg-quantum=4"));
+    }
+
     // collect `malloc_conf` string:
     let mut malloc_conf = String::new();
 
